@@ -40,16 +40,33 @@ void setup() {
   timerAlarmEnable(timer);
 }
 
+void test_vot(float vot){
+  digitalWrite(AIN1, LOW);
+  digitalWrite(AIN2, vot);
+  digitalWrite(BIN1, vot);
+  digitalWrite(BIN2, LOW);
+  delay(10);
+}
+
+float vot = 5.0;
+
 void loop() {
 //  Serial.print("R: ");
 //  Serial.print(cnt_R);
 //  Serial.print(" L: ");
 //  Serial.println(cnt_L);
-
-  Serial.print("VR: ");
+  if(vot>1.0)
+    vot-=0.2;
+  else
+    vot = 5.0;
+  test_vot(vot);
+  Serial.print("Voltage: ");
+  Serial.print(vot);
+  Serial.print(" VR: ");
   Serial.print(Velocity_Left);
   Serial.print(" VL: ");
   Serial.println(Velocity_Right);
+  delay(500);
 
 //  front(10);
 }
