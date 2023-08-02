@@ -4,8 +4,6 @@
 #include <BLEUtils.h>
 #include <BLE2902.h>
 
-
-
 #define AIN1 26
 #define AIN2 27
 #define BIN1 17
@@ -23,11 +21,20 @@
 #define LA  18
 #define LB  19
 
-#define MOVING_PULSE 100
+#define SERVICE_UUID           "6E400001-B5A3-F393-E0A9-E50E24DCCA9E" // UART service UUID
+#define CHARACTERISTIC_UUID "6E400002-B5A3-F393-E0A9-E50E24DCCA9E"
+uint8_t txValue = 0;                         //后面需要发送的值
+BLEServer *pServer = NULL;                   //BLEServer指针 pServer
+BLECharacteristic *pTxCharacteristic = NULL; //BLECharacteristic指针 pTxCharacteristic
+bool deviceConnected = false;                //本次连接状态
+BLECharacteristic controlCharacteristic(SERVICE_UUID, 
+                                        BLECharacteristic::PROPERTY_READ | 
+                                        BLECharacteristic::PROPERTY_WRITE |
+                                        BLECharacteristic::PROPERTY_NOTIFY);
 
 long cnt_L, cnt_R = 0;
 int Velocity_Left, Velocity_Right = 0;
-int pwm_l = 0, pwm_r=0; //Motor pwm speed
+int pwm_v = 650, speed_step = 5; //Motor pwm speed
 hw_timer_t *timer = NULL;
 
 void Left_encoder_isr_A();
@@ -39,6 +46,39 @@ void back (int pwm_v);
 void sstop();
 //void IRAM_ATTR TimerEvent();
 void IRAM_ATTR update_speed();
+
+
+class MyServerCallbacks : public BLEServerCallbacks
+{
+    void onConnect(BLEServer *pServer)
+    {
+        Serial.println("SuperCar Connected.");
+        deviceConnected = true;
+    };
+ 
+    void onDisconnect(BLEServer *pServer)
+    {
+        Serial.println("SuperCar Disonnected.");
+        deviceConnected = false;
+    }
+};
+ 
+class MyCallbacks : public BLECharacteristicCallbacks
+{
+    void onWrite(BLECharacteristic *pCharacteristic)
+    {
+        std::string rxValue = pCharacteristic->getValue(); //接收信息
+ 
+        if (rxValue.length() > 0)
+        { //向串口输出收到的值
+            Serial.print("RX: ");
+            for (int i = 0; i < rxValue.length(); i++)
+                Serial.print(rxValue[i]);
+            Serial.println();
+        }
+    }
+};
+
 
 void setup() {
   Serial.begin(115200);
@@ -74,9 +114,19 @@ void setup() {
   timerAttachInterrupt(timer, &update_speed, true);
   timerAlarmWrite(timer, 100000, true); //100ms update
   timerAlarmEnable(timer);
+
+  BLEDevice::init("SuperCar");//在这里面是ble的名称
+  pServer = BLEDevice::createServer();
+  BLEService *pService = pServer->createService(SERVICE_UUID);
+  pServer->setCallbacks(new MyServerCallbacks());
+
+  pService->addCharacteristic(&controlCharacteristic);
+  controlCharacteristic.setValue("Control");
+  pService->start();                  // 开始服务
+  pServer->getAdvertising()->start(); // 开始广播
+  Serial.println(" Super Car waiting for connection... ");
 }
 
-int pwm_v = 700;
 char cmd = 's';
 void loop() {
     
@@ -90,30 +140,39 @@ void loop() {
   if(Serial.available())
     cmd = (char)Serial.read();
 
-  Serial.println(cmd);
+  if(deviceConnected){
+    std::string recv = controlCharacteristic.getValue();
+    cmd = recv[0];
+  }
+
   switch(cmd){
     case 'w': 
-      Serial.print("front");
+      if(deviceConnected) {controlCharacteristic.setValue("front"); controlCharacteristic.notify();}
       front(pwm_v);
       break;
     case 'a':
-      Serial.print("front");
+      if(deviceConnected) controlCharacteristic.setValue("left");
       left(pwm_v);
       break;
     case 'd':
+      if(deviceConnected) controlCharacteristic.setValue("right");
       right(pwm_v);
       break;
     case 'x':
+      if(deviceConnected) controlCharacteristic.setValue("back");
       back(pwm_v);
       break;
     case 's':
+      if(deviceConnected) controlCharacteristic.setValue("stop");
       sstop();
       break;
     case '+':
-      if(pwm_v+100<1000) pwm_v+=20;
+      if(deviceConnected) controlCharacteristic.setValue("speed up");
+      if(pwm_v+100<1000) pwm_v+=speed_step;
       break;
     case '-':
-      if(pwm_v-600>0   ) pwm_v-=20;
+      if(deviceConnected) controlCharacteristic.setValue("speed down");
+      if(pwm_v-600>0   ) pwm_v-=speed_step;
       break;
     default:
       ;
